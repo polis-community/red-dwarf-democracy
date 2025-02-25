@@ -30,6 +30,27 @@ CONVOS = {
 }
 
 if True:
+    # test agora method
+    from reddwarf.agora import run_clustering
+    from reddwarf.types.agora import Conversation
+
+    report_id = CONVOS["tech-politics-2018"]["report_id"]
+    print(f"Loading data from report: https://pol.is/report/{report_id}")
+
+    client = PolisClient()
+    client.load_data(report_id=report_id)
+
+    convo: Conversation = {
+        "id": "demo",
+        "votes": client.data_loader.votes_data,
+    }
+    results = run_clustering(conversation=convo)
+
+    from pprint import pprint
+    pprint(results)
+
+if False:
+    # Render a figure with best hulls.
     report_id = CONVOS["tech-politics-2018"]["report_id"]
     print(f"Loading data from report: https://pol.is/report/{report_id}")
 

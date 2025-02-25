@@ -1,5 +1,11 @@
 # API Reference
 
+## `reddwarf.agora`
+
+### ::: reddwarf.agora.run_clustering_v1
+    options:
+        show_root_heading: true
+
 ## `reddwarf.utils`
 
 ### ::: reddwarf.utils.filter_votes
@@ -41,5 +47,40 @@
 ## `reddwarf.data_presenter`
 
 ### ::: reddwarf.data_presenter.generate_figure
+    options:
+        show_root_heading: true
+
+
+## Types
+
+### ::: reddwarf.types.agora.Conversation
+    options:
+        show_root_heading: true
+
+### ::: reddwarf.types.agora.Vote
+    options:
+        show_root_heading: true
+
+### ::: reddwarf.types.agora.VoteValueEnum
+    options:
+        show_root_heading: true
+
+### ::: reddwarf.types.agora.Identifier
+    options:
+        show_root_heading: true
+
+### ::: reddwarf.types.agora.ClusteringOptions
+    options:
+        show_root_heading: true
+
+### ::: reddwarf.types.agora.ClusteringResult
+    options:
+        show_root_heading: true
+
+### ::: reddwarf.types.agora.Cluster
+    options:
+        show_root_heading: true
+
+### ::: reddwarf.types.agora.ClusteredParticipant
     options:
         show_root_heading: true
