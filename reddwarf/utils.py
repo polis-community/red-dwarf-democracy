@@ -304,6 +304,7 @@ def run_kmeans(
 def find_optimal_k(
         projected_data: pd.DataFrame,
         max_group_count: int = 5,
+        init_centers: Optional[List] = None,
         random_state: Optional[int] = None,
         debug: bool = False,
 ) -> Tuple[int, float, np.ndarray]:
@@ -329,6 +330,7 @@ def find_optimal_k(
         cluster_labels, _ = run_kmeans(
             dataframe=projected_data,
             n_clusters=k_test,
+            init_centers=init_centers,
             random_state=random_state,
         )
         this_silhouette_score = silhouette_score(projected_data, cluster_labels)
