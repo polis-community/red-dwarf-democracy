@@ -29,7 +29,7 @@ CONVOS = {
     },
 }
 
-if True:
+if False:
     report_id = CONVOS["tech-politics-2018"]["report_id"]
     print(f"Loading data from report: https://pol.is/report/{report_id}")
 
@@ -48,6 +48,26 @@ if True:
     presenter = DataPresenter(client=client)
     presenter.render_optimal_cluster_figure()
     # client.generate_figure(coord_dataframe=client.projected_data)
+
+if True:
+    # test demdis method
+    from reddwarf.demdis import run_clustering
+
+    report_id = CONVOS["tech-politics-2018"]["report_id"]
+    print(f"Loading data from report: https://pol.is/report/{report_id}")
+
+    client = PolisClient()
+    client.load_data(report_id=report_id)
+
+    results = run_clustering(
+        votes=client.data_loader.votes_data,
+        reference_cluster_centers=None,
+        # specific_cluster_count=2,
+        do_remap=False,
+    )
+
+    from pprint import pprint
+    pprint(results)
 
 if False:
     # Show convo with duplicate votes.
