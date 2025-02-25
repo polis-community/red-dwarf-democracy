@@ -17,6 +17,11 @@ A <em>DIM</em>ensional <em>RED</em>uction library for [stellarpunk][] democracy 
 
 Inspiration: https://chatgpt.com/share/677f7690-7188-800b-85e5-816aaa7cc8f9
 
+[![Thanks to generous sponsorship from Agora Citizen Network](docs/agora-sponsorship-header.png)][agora]
+<!-- Generated from: https://leviarista.github.io/github-profile-header-generator/ meta: kalam, ubuntu, 223, 251, 215 -->
+
+<sup>(See [_Sponsorship_](#sponsorship) section below.)</sup>
+
 ## Roadmap
 
 For now, see [this related issue](https://github.com/patcon/red-dwarf/issues/4)
@@ -93,6 +98,20 @@ client.load_data(filepaths=[
 ])
 ```
 
+## Get Involved
+
+- [Join][pug-discord] the _Polis User Group (PUG)_ **Discord** server.
+- Open a **GitHub issue**.
+- Submit a **GitHub pull request**.
+- Review the [**_Awesome Polis_ directory**][awesome-polis] to learn about related projects, academic papers, and other resources.
+   - Use the _"People"_ section to find other individuals and groups working in the field.
+
+## Sponsorship
+
+> Red Dwarf is generously sponsored by [**ZKorum**][zkorum], creators of the [**Agora Citizen Network**][agora], through [their funding][ngi-funding] from the NGI TrustChain program, part of the EU's Horizon Europe 2020 research and innovation program. Work on this project would not be sustainable without them.
+
+Are you or your organization eager to see more platforms and community built around democracy-supporting algorithms like these? **Please consider [getting in touch on Discord](#get-involved) and supporting our continued work!** (ping @patcon)
+
 ## License
 
 [MPL 2.0: Mozilla Public License 2.0][mplv2] (See [`LICENSE`][license])
@@ -100,5 +119,10 @@ client.load_data(filepaths=[
 <!-- Links -->
    [stellarpunk]: https://www.youtube.com/watch?v=opnkQVZrhAw
    [notebook]: https://github.com/polis-community/red-dwarf/blob/main/docs/example-usage.ipynb
+   [ZKorum]: https://github.com/zkorum
+   [agora]: https://agoracitizen.network/
+   [ngi-funding]: https://trustchain.ngi.eu/zkorum/
    [MPLv2]: https://choosealicense.com/licenses/mpl-2.0/
    [license]: https://github.com/polis-community/red-dwarf/blob/main/LICENSE
+   [pug-discord]: https://discord.com/invite/wFWB8kzQpP
+   [awesome-polis]: http://patcon.github.io/awesome-polis/
