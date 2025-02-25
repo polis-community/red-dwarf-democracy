@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.impute import SimpleImputer
-from sklearn.cluster import KMeans
+from reddwarf.cluster import KMeansPolis
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
 from typing import List, Dict, Tuple, Optional, Literal, TypeAlias
@@ -292,7 +292,7 @@ def run_kmeans(
         # Use the default strategy in sklearn.
         init_arg = "k-means++"
     # TODO: Set random_state to a value eventually, so calculation is deterministic.
-    kmeans = KMeans(
+    kmeans = KMeansPolis(
         n_clusters=n_clusters,
         random_state=random_state,
         init=init_arg,
