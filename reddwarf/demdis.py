@@ -85,13 +85,16 @@ def run_clustering(
     # Add cluster label column to dataframe.
     projected_data = projected_data.assign(cluster_id=cluster_labels)
 
-    def build_centers(projected_data):
+    merged_df = projected_data.join(filtered_vote_matrix)
+
+
+    def build_centers(df):
         centers = [
             {
                 "name": DEFAULT_CLUSTER_NAMES[cluster_id],
                 "center_x": float(cluster_centers[cluster_id][0]),
                 "center_y": float(cluster_centers[cluster_id][1]),
-                "participant_count": len(group_df),
+                "participant_count": (group_participant_count := len(group_df)),
                 "participants": [
                     {
                         "participant_id": row.index,
@@ -101,9 +104,23 @@ def run_clustering(
                     }
                     for row in group_df.itertuples(index=True)
                 ],
-                "statements": [], # TODO
+                "statements": [
+                    {
+                        "statement_id": statement_id,
+                        "cluster_center_name": DEFAULT_CLUSTER_NAMES[cluster_id],
+                        "agreement_count": (agreement_count := int((group_df[statement_id] == 1).sum())),
+                        "disagreement_count": int((group_df[statement_id] == -1).sum()),
+                        "skip_count": int((group_df[statement_id] == 0).sum()),
+                        "unseen_count": int(group_df[statement_id].isna().sum()),
+                        "agreement_percentage": (agreement_count / group_participant_count) * 100,
+                        "cluster_defining_pos_coefficient": 0.0, # TODO
+                        "cluster_defining_neg_coefficient": 0.0, # TODO
+                        "cluster_defining_skip_coefficient": 0.0, # TODO
+                    }
+                    for statement_id in filtered_vote_matrix.columns
+                ],
             }
-            for cluster_id, group_df in projected_data.groupby("cluster_id")
+            for cluster_id, group_df in df.groupby("cluster_id")
         ]
 
         return centers
@@ -116,7 +133,7 @@ def run_clustering(
         "last_vote_at": None, # TODO
 
         "statement_metrics": [],
-        "centers": build_centers(projected_data),
+        "centers": build_centers(merged_df),
     }
 
     return result
