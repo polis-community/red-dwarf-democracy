@@ -63,7 +63,7 @@ if True:
         votes=client.data_loader.votes_data,
         reference_cluster_centers=None,
         # specific_cluster_count=2,
-        do_remap=False,
+        skip_remap=True,
     )
 
     from pprint import pprint

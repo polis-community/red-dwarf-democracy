@@ -47,9 +47,9 @@ def run_clustering(
     reference_cluster_centers: list[ClusteringCenterModel] | None,
     statement_boost: tuple[Annotated[int, "statement id"], Annotated[float, "boost"]] | None = None,
     specific_cluster_count: int | None = None,
-    do_remap = True,
+    skip_remap = False,
 ) -> ClusteringResult:
-    if do_remap:
+    if not skip_remap:
         votes = remap_vote_values(votes, DEMDIS_VOTE_VALUE_MAPPING, DEMDIS_VOTE_KEY_MAPPING)
 
     raw_vote_matrix = utils.generate_raw_matrix(votes=votes)
