@@ -138,7 +138,16 @@ def run_clustering(
         "statement_count": len(raw_vote_matrix.columns),
         "last_vote_at": datetime.fromtimestamp(last_vote_timestamp/1000),
 
-        "statement_metrics": [],
+        "statement_metrics": [
+            {
+                "statement_id": statement_id,
+                "mean_agreement_percentage": 0.0, # TODO
+                "consensus_points": 0, # TODO
+                "polarization_measurement": 0.0, # TODO
+
+            }
+            for statement_id in filtered_vote_matrix.columns
+        ],
         "centers": build_centers(merged_df),
     }
 
