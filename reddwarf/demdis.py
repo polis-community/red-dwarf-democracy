@@ -2,6 +2,7 @@ from typing import Annotated
 from reddwarf.types.demdis import ClusteringResult, VoteModel, ClusteringCenterModel, ClusteringCenter, VoteValueEnum as DemDisVoteValueEnum
 from reddwarf.types.base import VoteValueEnum as BaseVoteValueEnum
 from reddwarf import utils
+from datetime import datetime
 
 
 DEFAULT_MIN_USER_VOTE_THRESHOLD = 7
@@ -51,6 +52,11 @@ def run_clustering(
 ) -> ClusteringResult:
     if not skip_remap:
         votes = remap_vote_values(votes, DEMDIS_VOTE_VALUE_MAPPING, DEMDIS_VOTE_KEY_MAPPING)
+
+    last_vote_timestamp = 0
+    for vote in votes:
+        if vote["modified"] > last_vote_timestamp:
+            last_vote_timestamp = vote["modified"]
 
     raw_vote_matrix = utils.generate_raw_matrix(votes=votes)
     all_statement_ids = raw_vote_matrix.columns
@@ -130,7 +136,7 @@ def run_clustering(
         "participants_clustered": len(filtered_vote_matrix.index),
         "vote_count": int(raw_vote_matrix.count().sum()),
         "statement_count": len(raw_vote_matrix.columns),
-        "last_vote_at": None, # TODO
+        "last_vote_at": datetime.fromtimestamp(last_vote_timestamp/1000),
 
         "statement_metrics": [],
         "centers": build_centers(merged_df),
