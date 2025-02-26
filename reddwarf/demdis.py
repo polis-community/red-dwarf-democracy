@@ -84,8 +84,6 @@ def run_clustering(
 
     # Add cluster label column to dataframe.
     projected_data = projected_data.assign(cluster_id=cluster_labels)
-    # Convert participant_id index into regular column, for ease of transformation.
-    projected_data = projected_data.reset_index()
 
     def build_centers(projected_data):
         centers = [
@@ -96,12 +94,12 @@ def run_clustering(
                 "participant_count": len(group_df),
                 "participants": [
                     {
-                        "participant_id": row.participant_id,
+                        "participant_id": row.index,
                         "cluster_center_name": DEFAULT_CLUSTER_NAMES[cluster_id],
                         "x": row.x,
                         "y": row.y,
                     }
-                    for row in group_df.itertuples(index=False)
+                    for row in group_df.itertuples(index=True)
                 ],
                 "statements": [], # TODO
             }
