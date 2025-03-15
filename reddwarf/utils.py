@@ -4,8 +4,20 @@ from sklearn.impute import SimpleImputer
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
-from typing import List, Dict, Tuple, Optional, Literal, TypeAlias
+from typing import Any, List, Dict, Tuple, Optional, Literal, TypeAlias
 from reddwarf.exceptions import RedDwarfError
+from scipy.stats import norm
+
+from numpy.typing import ArrayLike
+from types import SimpleNamespace
+
+from reddwarf.types.polis import (
+    PolisBaseClusters,
+    PolisGroupCluster,
+    PolisGroupClusterExpanded,
+    GroupId,
+    ParticipantId,
+)
 
 VoteMatrix: TypeAlias = pd.DataFrame
 
@@ -345,13 +357,222 @@ def find_optimal_k(
 
     return optimal_k, optimal_silhouette, optimal_cluster_labels
 
+def one_prop_test(
+    succ: ArrayLike,
+    n: ArrayLike,
+) -> np.float64 | np.ndarray[np.float64]:
+    # Convert inputs to numpy arrays (if they aren't already)
+    succ = np.asarray(succ) + 1
+    n = np.asarray(n) + 1
 
-def calculate_representativeness(
-        vote_matrix: VoteMatrix,
-        cluster_labels: np.ndarray,
-        group_id: int,
-        pseudo_count: int = 1,
-) -> pd.DataFrame:
+    # Compute the test statistic
+    return 2 * np.sqrt(n) * ((succ / n) - 0.5)
+
+# Calculate representativeness two-prop test
+def two_prop_test(
+    succ_in: ArrayLike,
+    succ_out: ArrayLike,
+    n_in: ArrayLike,
+    n_out: ArrayLike,
+) -> np.float64 | np.ndarray[np.float64]:
+    """Two-prop test ported from Polis. Accepts numpy arrays for bulk processing."""
+    # Ported with adaptation from Polis
+    # See: https://github.com/compdemocracy/polis/blob/90bcb43e67dad660629e0888fedc0d32379f375d/math/src/polismath/math/stats.clj#L18-L33
+
+    # Laplace smoothing (add 1 to each count)
+    succ_in = np.asarray(succ_in) + 1
+    succ_out = np.asarray(succ_out) +  1
+    n_in = np.asarray(n_in) +  1
+    n_out = np.asarray(n_out) +  1
+
+    # Compute proportions
+    pi1 = succ_in / n_in
+    pi2 = succ_out / n_out
+    pi_hat = (succ_in + succ_out) / (n_in + n_out)
+
+    # Handle edge case when pi_hat == 1
+    # TODO: Handle when divide by zero.
+    if np.any(pi_hat == 1):
+        # XXX: Not technically correct; limit-based solution needed.
+        return np.where(pi_hat == 1, 0, (pi1 - pi2) / np.sqrt(pi_hat * (1 - pi_hat) * (1 / n_in + 1 / n_out)))
+
+    # Compute the test statistic
+    denominator = np.sqrt(pi_hat * (1 - pi_hat) * (1 / n_in + 1 / n_out))
+
+    return (pi1 - pi2) / denominator
+
+def z_sig_90(z_val) -> bool:
+    """Test whether z-statistic is significant at 90% confidence (one-tailed, right-side)."""
+    critical_value = norm.ppf(0.90)  # 90% confidence level, one-tailed
+    return z_val > critical_value
+
+def is_passes_by_test(pat, rat, pdt, rdt) -> bool:
+    "Decide whether we should count a statement in a group as being representative."
+    is_agreement_significant = z_sig_90(pat) and z_sig_90(rat)
+    is_disagreement_significant = z_sig_90(pdt) and z_sig_90(rdt)
+
+    return is_agreement_significant or is_disagreement_significant
+
+def beats_best_by_test(rad, rdt, current_best) -> bool:
+    """
+    Returns True if a given comment/group stat has a more representative z-score than
+    current_best_z. Used for ensuring at least one representative comment for every group,
+    even if none remain after more thorough filters.
+    """
+    if current_best is not None:
+        this_repness_test = max(rad, rdt)
+        current_best_repness_test = max(current_best["rat"], current_best["rdt"])
+
+        return this_repness_test > current_best_repness_test
+    else:
+        return True
+
+
+def beats_best_agr(na, nd, ra, rat, pa, pat, ns, current_best) -> bool:
+    """
+    Like beats_best_by_test, but only considers agrees. Additionally, doesn't focus solely on repness,
+    but also on raw probability of agreement, so as to ensure that there is some representation of what
+    people in the group agree on. Also, note that this takes the current_best statement, instead of just current_best_z.
+    """
+
+    # Explicitly don't allow something that hasn't been voted on at all
+    if na == 0 and nd == 0:
+        return False
+
+    # If we have a current_best by representativeness estimate, use the more robust measurement
+    if (current_best is not None) and current_best["ra"] > 1.0:
+        return (ra * rat * pa * pat) > (current_best["ra"] * current_best["rat"] * current_best["pa"] * current_best["pat"])
+
+    # If we have current_best, but only by probability estimate, just shoot for something generally agreed upon
+    if current_best is not None:
+        return (pa * pat) > (current_best["pa"] * current_best["pat"])
+
+    # Otherwise, accept if either representativeness or probability look generally good
+    return z_sig_90(pat) or (ra > 1.0 and pa > 0.5)
+
+# For making it more legible to get index of agree/disagree votes in numpy array.
+votes = SimpleNamespace(A=0, D=1)
+
+def count_votes(
+    values: ArrayLike,
+    vote_value: Optional[int] = None,
+) -> np.int64 | np.ndarray[np.int64]:
+    values = np.asarray(values)
+    if vote_value:
+        # Count votes that match value.
+        return np.sum(values == vote_value, axis=0)
+    else:
+        # Count any non-missing values.
+        return np.sum(np.isfinite(values), axis=0)
+
+def count_disagree(values: ArrayLike) -> np.int64 | np.ndarray[np.int64]:
+    return count_votes(values, -1)
+
+def count_agree(values: ArrayLike) -> np.int64 | np.ndarray[np.int64]:
+    return count_votes(values, 1)
+
+def count_all_votes(values: ArrayLike) -> np.int64 | np.ndarray[np.int64]:
+    return count_votes(values)
+
+def probability(count, total, pseudo_count=1):
+    """Probability with Laplace smoothing"""
+    return (pseudo_count + count ) / (2*pseudo_count + total)
+
+def calculate_comment_statistics(
+    vote_matrix: VoteMatrix,
+    cluster_labels: list[int],
+    pseudo_count: int = 1,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    cluster_labels = np.asarray(cluster_labels)
+    # Get the vote matrix values
+    X = vote_matrix.values
+
+    group_count = cluster_labels.max()+1
+    statement_ids = vote_matrix.columns
+
+    # Set up all the variables to be populated.
+    N_g_c = np.empty([group_count, len(statement_ids)], dtype='int32')
+    N_v_g_c = np.empty([len(votes.__dict__), group_count, len(statement_ids)], dtype='int32')
+    P_v_g_c = np.empty([len(votes.__dict__), group_count, len(statement_ids)])
+    R_v_g_c = np.empty([len(votes.__dict__), group_count, len(statement_ids)])
+    P_v_g_c_test = np.empty([len(votes.__dict__), group_count, len(statement_ids)])
+    R_v_g_c_test = np.empty([len(votes.__dict__), group_count, len(statement_ids)])
+
+    for gid in range(group_count):
+        # Create mask for the participants in target group
+        in_group_mask = (cluster_labels == gid)
+        X_in_group = X[in_group_mask]
+
+        # Count any votes [-1, 0, 1] for all statements/features at once
+
+        # NON-GROUP STATS
+
+        # For in-group
+        n_agree_in_group    = N_v_g_c[votes.A, gid, :] = count_agree(X_in_group)    # na
+        n_disagree_in_group = N_v_g_c[votes.D, gid, :] = count_disagree(X_in_group) # nd
+        n_votes_in_group    = N_g_c[gid, :] = count_all_votes(X_in_group)           # ns
+
+        # Calculate probabilities
+        p_agree_in_group    = P_v_g_c[votes.A, gid, :] = probability(n_agree_in_group, n_votes_in_group)    # pa
+        p_disagree_in_group = P_v_g_c[votes.D, gid, :] = probability(n_disagree_in_group, n_votes_in_group) # pd
+
+        # Calculate probability test z-scores
+        P_v_g_c_test[votes.A, gid, :] = one_prop_test(n_agree_in_group, n_votes_in_group)    # pat
+        P_v_g_c_test[votes.D, gid, :] = one_prop_test(n_disagree_in_group, n_votes_in_group) # pdt
+
+        # GROUP COMPARISON STATS
+
+        out_group_mask = ~in_group_mask
+        X_out_group = X[out_group_mask]
+
+        # For out-group
+        n_agree_out_group = count_agree(X_out_group)
+        n_disagree_out_group = count_disagree(X_out_group)
+        n_votes_out_group = count_all_votes(X_out_group)
+
+        # Calculate out-group probabilities
+        p_agree_out_group    = probability(n_agree_out_group, n_votes_out_group)
+        p_disagree_out_group = probability(n_disagree_out_group, n_votes_out_group)
+
+        # Calculate representativeness
+        R_v_g_c[votes.A, gid, :] = p_agree_in_group / p_agree_out_group       # ra
+        R_v_g_c[votes.D, gid, :] = p_disagree_in_group / p_disagree_out_group # rd
+
+        # Calculate representativeness test z-scores
+        R_v_g_c_test[votes.A, gid, :] = two_prop_test(n_agree_in_group, n_agree_out_group, n_votes_in_group, n_votes_out_group)       # rat
+        R_v_g_c_test[votes.D, gid, :] = two_prop_test(n_disagree_in_group, n_disagree_out_group, n_votes_in_group, n_votes_out_group) # rdt
+
+    return (
+        N_g_c, # ns
+        N_v_g_c, # na / nd
+        P_v_g_c, # pa / pd
+        R_v_g_c, # ra / rd
+        P_v_g_c_test, # pat / pdt
+        R_v_g_c_test, # rat / rdt
+    )
+
+def finalize_cmt_stats(cmt: pd.Series) -> dict:
+    if cmt["rat"] > cmt["rdt"]:
+        vals = [cmt[k] for k in ["na", "ns", "pa", "pat", "ra", "rat"]] + ["agree"]
+    else:
+        vals = [cmt[k] for k in ["nd", "ns", "pd", "pdt", "rd", "rdt"]] + ["disagree"]
+
+    return {
+        "tid":          int(cmt["statement_id"]),
+        "n-success":    int(vals[0]),
+        "n-trials":     int(vals[1]),
+        "p-success":    float(vals[2]),
+        "p-test":       float(vals[3]),
+        "repness":      float(vals[4]),
+        "repness-test": float(vals[5]),
+        "repful-for":   vals[6],
+    }
+
+def calculate_comment_statistics_by_group(
+    vote_matrix: VoteMatrix,
+    cluster_labels: list[int],
+    pseudo_count: int = 1,
+) -> list[pd.DataFrame]:
     """
     Calculate the Polis representativeness metric for every statement for a specific group.
 
@@ -373,44 +594,212 @@ def calculate_representativeness(
         representativeness (pd.DataFrame): DataFrame containing representativeness scores for each comment,
                                           with columns for agree_repr, disagree_repr, and n_votes.
     """
-    # Create mask for the participants in target group
-    in_group_mask = (cluster_labels == group_id)
-    out_group_mask = ~in_group_mask
+    cluster_labels = np.asarray(cluster_labels)
+    N_g_c, N_v_g_c, P_v_g_c, R_v_g_c, P_v_g_c_test, R_v_g_c_test = calculate_comment_statistics(
+        vote_matrix=vote_matrix,
+        cluster_labels=cluster_labels,
+        pseudo_count=pseudo_count,
+    )
 
-    # Get the vote matrix values
-    X = vote_matrix.values
-    X_in_group = X[in_group_mask]
-    X_out_group = X[out_group_mask]
+    group_count = cluster_labels.max()+1
+    group_stats = [None] * group_count
+    for group_id in range(group_count):
+        group_stats[group_id] = pd.DataFrame({
+            'na':  N_v_g_c[votes.A, group_id, :],
+            'nd':  N_v_g_c[votes.D, group_id, :],
+            'ns':  N_g_c[group_id, :],
+            'pa':  P_v_g_c[votes.A, group_id, :],
+            'pd':  P_v_g_c[votes.D, group_id, :],
+            'pat': P_v_g_c_test[votes.A, group_id, :],
+            'pdt': P_v_g_c_test[votes.D, group_id, :],
+            'ra':  R_v_g_c[votes.A, group_id, :],
+            'rd':  R_v_g_c[votes.D, group_id, :],
+            'rat': R_v_g_c_test[votes.A, group_id, :],
+            'rdt': R_v_g_c_test[votes.D, group_id, :],
+        }, index=vote_matrix.columns)
 
-    # Count any votes [-1, 0, 1] for all statements/features at once
+    return group_stats
 
-    # For in-group
-    n_agree_in_group = np.sum(X_in_group == 1, axis=0)
-    n_disagree_in_group = np.sum(X_in_group == -1, axis=0)
-    n_votes_in_group = np.sum(np.isfinite(X_in_group), axis=0)
+# Figuring out select-rep-comments flow
+# See: https://github.com/compdemocracy/polis/blob/7bf9eccc287586e51d96fdf519ae6da98e0f4a70/math/src/polismath/math/repness.clj#L209C7-L209C26
+# TODO: omg please clean this up.
+def select_rep_comments(stats_by_group: list[pd.DataFrame], pick_n: int = 5):
+    polis_repness = {}
+    for gid, stats_df in enumerate(stats_by_group):
+        sufficient_statements = []
+        best_agree_of_sufficient = None
+        best_of_all = None
 
-    # For out-group
-    n_agree_out_group = np.sum(X_out_group == 1, axis=0)
-    n_disagree_out_group = np.sum(X_out_group == -1, axis=0)
-    n_votes_out_group = np.sum(np.isfinite(X_out_group), axis=0)
+        def create_filter_mask(row):
+            return is_passes_by_test(row["pat"], row["rat"], row["pdt"], row["rdt"])
 
-    # Apply Laplace smoothing and calculate probabilities
-    p_agree_in_group = (pseudo_count + n_agree_in_group) / (2*pseudo_count + n_votes_in_group)
-    p_agree_out_group = (pseudo_count + n_agree_out_group) / (2*pseudo_count + n_votes_out_group)
+        sufficient_statements = stats_df[stats_df.apply(create_filter_mask, axis=1)]
+        sufficient_statements = pd.DataFrame([
+                finalize_cmt_stats(row)
+                for _, row in sufficient_statements.reset_index().iterrows()
+            ],
+            index=sufficient_statements.index,
+        )
 
-    p_disagree_in_group = (pseudo_count + n_disagree_in_group) / (2*pseudo_count + n_votes_in_group)
-    p_disagree_out_group = (pseudo_count + n_disagree_out_group) / (2*pseudo_count + n_votes_out_group)
+        if len(sufficient_statements) > 0:
+            repness_metric = lambda row: row["repness"] * row["repness-test"] * row["p-success"] * row["p-test"]
+            sufficient_statements = (sufficient_statements
+                .assign(sort_order=repness_metric)
+                .sort_values(by="sort_order", ascending=False)
+            )
 
-    # Calculate representativeness
-    agree_repr = p_agree_in_group / p_agree_out_group
-    disagree_repr = p_disagree_in_group / p_disagree_out_group
+        # Track the best, even if doesn't meet sufficient minimum, to have at least one.
+        # TODO: Merge this wil above iteration
+        if len(sufficient_statements) == 0:
+            for _, row in stats_df.reset_index().iterrows():
+                if beats_best_by_test(row["rat"], row["rdt"], best_of_all):
+                    best_of_all = row
 
-    # Create result DataFrame
-    group_representativeness = pd.DataFrame({
-        'agree_repr': agree_repr,
-        'disagree_repr': disagree_repr,
-        'n_votes_in_group': n_votes_in_group,
-        'n_votes_out_group': n_votes_out_group
-    }, index=vote_matrix.columns)
+        # Track the best-agree, to bring to top if exists.
+        for _, row in stats_df.reset_index().iterrows():
+            if beats_best_agr(row["na"], row["nd"], row["ra"], row["rat"], row["pa"], row["pat"], row["ns"], best_agree_of_sufficient):
+                best_agree_of_sufficient = row
 
-    return group_representativeness
+        # Start building repness key
+        if best_agree_of_sufficient is not None:
+            best_agree_of_sufficient = finalize_cmt_stats(best_agree_of_sufficient)
+            best_agree_of_sufficient.update({"n-agree": best_agree_of_sufficient["n-success"], "best-agree": True})
+            best_head = [best_agree_of_sufficient]
+        elif best_of_all is not None:
+            best_head = [best_of_all]
+        else:
+            best_head = []
+
+        if len(sufficient_statements) > 0:
+            sufficient_statements = sufficient_statements.drop(columns="sort_order")
+        if len(best_head) > 0:
+            selected = best_head + [dict(row) for _, row in sufficient_statements.iterrows() if row["tid"] != best_head[0]["tid"]]
+        else:
+            selected = [dict(row) for _, row in sufficient_statements.iterrows()]
+        # sorted() does the work of agrees-before-disagrees in polismath
+        polis_repness[str(gid)] = sorted(selected[:pick_n], key=lambda x: x["repful-for"])
+
+    return polis_repness
+
+## POLISMATH HELPERS
+#
+# These functions are generally used to transform data from the polismath object
+# that gets returned from the /api/v3/math/pca2 endpoint.
+
+def expand_group_clusters_with_participants(
+    group_clusters: list[PolisGroupCluster],
+    base_clusters: PolisBaseClusters,
+) -> list[PolisGroupClusterExpanded]:
+    """
+    Expand group clusters to include direct participant IDs instead of base cluster IDs.
+
+    Args:
+        group_clusters (list[PolisGroupCluster]): Group cluster data from Polis math data, with base cluster ID membership.
+        base_clusters (PolisBaseClusters): Base cluster data from Polis math data, with participant ID membership.
+
+    Returns:
+        group_clusters_with_participant_ids (list[PolisGroupClusterExpanded]): A list of group clusters with participant IDs.
+    """
+    # Extract base clusters and their members
+    base_cluster_ids = base_clusters["id"]
+    base_cluster_participant_ids = base_clusters["members"]
+
+    # Create a mapping from base cluster ID to member participant IDs
+    base_to_participant_mapping = dict(zip(base_cluster_ids, base_cluster_participant_ids))
+
+    # Create the new group-clusters-participant list
+    group_clusters_with_participant_ids = []
+
+    for group in group_clusters:
+        # Get all participant IDs for this group by expanding and flattening the base cluster members.
+        group_participant_ids = [
+            participant_id
+            for base_cluster_id in group["members"]
+            for participant_id in base_to_participant_mapping[base_cluster_id]
+        ]
+
+        # Create the new group object with expanded participant IDs
+        expanded_group = {
+            **group,
+            "id": group["id"],
+            "members": group_participant_ids,
+        }
+
+        group_clusters_with_participant_ids.append(expanded_group)
+
+    return group_clusters_with_participant_ids
+
+def generate_cluster_labels(
+    group_clusters_with_pids: list[PolisGroupClusterExpanded],
+) -> np.ndarray[GroupId]:
+    """
+    Transform group_clusters_with_pid into an ordered list of cluster IDs
+    sorted by participant ID, suitable for cluster labels.
+
+    Args:
+        group_clusters_with_pids (list[PolisGroupClusterExpanded]): List of group clusters with expanded participant IDs
+
+    Returns:
+        np.ndarray[GroupId]: A list of cluster IDs ordered by participant ID
+    """
+    # Create a list of (participant_id, cluster_id) pairs
+    participant_cluster_pairs = []
+
+    for cluster in group_clusters_with_pids:
+        cluster_id = cluster["id"]
+        for participant_id in cluster["members"]:
+            participant_cluster_pairs.append((participant_id, cluster_id))
+
+    # Sort the list by participant_id
+    sorted_pairs = sorted(participant_cluster_pairs, key=lambda x: x[0])
+
+    # Extract just the cluster IDs in order
+    cluster_ids_in_order = [pair[1] for pair in sorted_pairs]
+
+    return np.asarray(cluster_ids_in_order)
+
+def get_all_participant_ids(
+    group_clusters_with_pids: list[PolisGroupClusterExpanded],
+) -> list[ParticipantId]:
+    """
+    Extract all unique participant IDs from group_clusters_with_pids.
+
+    Args:
+        group_clusters_with_pids (list): List of group clusters with expanded participant IDs
+
+    Returns:
+        list: A sorted list of all unique participant IDs
+    """
+    # Gather all participant IDs from all clusters
+    all_participant_ids = []
+
+    for cluster in group_clusters_with_pids:
+        all_participant_ids.extend(cluster["members"])
+
+    # Remove duplicates and sort
+    unique_participant_ids = sorted(set(all_participant_ids))
+
+    return unique_participant_ids
+
+def extract_data_from_polismath(math_data: Any):
+    """
+    A helper to extract specific types of data from polismath data, to avoid having to recalculate it.
+
+    This is mostly helpful for debugging and working with the existing Polis platform API.
+
+    Args:
+        math_data (Any): The polismath data object that is returned from /api/v3/math/pca2
+
+    Returns:
+        list[ParticipantId]: A sorted list of all clustered/grouped Polis participant IDs
+        np.ndarray[GroupId]: A list of all cluster labels (aka group IDs), sorted by participant ID
+    """
+    group_clusters_with_pids = expand_group_clusters_with_participants(
+        group_clusters=math_data["group-clusters"],
+        base_clusters=math_data["base-clusters"],
+    )
+
+    grouped_participant_ids = get_all_participant_ids(group_clusters_with_pids)
+    cluster_labels = generate_cluster_labels(group_clusters_with_pids)
+
+    return grouped_participant_ids, cluster_labels
